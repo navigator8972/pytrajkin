@@ -1,0 +1,7 @@
+*.pyc
+init_env.py
+iterate.dat
+char_mdls
+data
+figs
+turing
