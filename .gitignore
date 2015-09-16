@@ -1,7 +1,9 @@
+.bzr
 *.pyc
 init_env.py
 iterate.dat
 char_mdls
-data
+data/*
+!data/get_ujipenchar2.sh
 figs
 turing
