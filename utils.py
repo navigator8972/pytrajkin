@@ -277,10 +277,10 @@ def display_data(letters):
                 ax.plot(x_data, -y_data)
     ax.set_xlabel('X Coordinate (Unit)')
     ax.set_ylabel('Y Coordinate (Unit)')
+    ax.set_aspect('equal')
     
-    plt.ioff()
-    plt.show()
-    return
+    plt.draw()
+    return ax
 
 def plot_trajs_helper(ax, trajs, linespec='-.g'):
     tmp_lines = []

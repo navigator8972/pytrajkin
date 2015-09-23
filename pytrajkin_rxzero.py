@@ -1,41 +1,11 @@
 """
 A module to implement Robust XZERO algorithm to extract Sig-normal model parameters
 See Ref. O'Reilly and Plamondon, Development of a Sigma-Lognormal representation for on-line signatures 
-"""
-"""
-HISTORY
-Jan-22-2015         hyin            Issues: 
-                                    1. do not use t_i = t0 + exp(-mu + a_i) to recover registration points, it is not robust
-                                    2. change to estimate angular position based on original velocity vectors, see extract function
-                                        if global_pos_traj is given, then use this as the target for local optimization and angular estimation
-                                    3. add/substract stroke seems quite sensitive to the estimation of angular position (after optimization)
-                                        shall we relies on phi_n to do the add/substraction?
-                                        The phenomenon is that when we estimate some (D, t0, mu, sigma), substracting this parameters does not necessarily
-                                        means elimination of the stroke effect in velocity profile...
-Jan-24-2015         hyin            ===Tried above three items, does not work well. So ignore them...===
-                                    Now the problem seems to be the wrong understanding of theta, given velocity profile seems fine.
-                                    Also, interestingly, non-constraint global optimization seems significantly improved the position tracking but the 
-                                    extracted components seems not intuitive
-                                    Possible ways: revisit the angular position/vel direction in our understanding. get_continuous_ang seems not reliable
-                                    Decompose x/y then there's no direction to encode, this will double parameters and abandon curvature features...
 
-                                    Update: A stupid error in the local optimization objective function, but more consideration is needed for add/substraction of stroke
-                                    as the stroke identificatio is still a shit...
-Jan-25-2015         hyin            ===Currently we stick to our understanding about the angular position -> velocity direction===
-                                    I guess we are almost there. The performance increased a lot for letter 'g' but it is somehow misleading for an even simpler 's'
-                                    the problem seems to be that we calculate SNR based on Xn and Yn but add/substraction might result in some tiny stroke which might be 
-                                    identified as next stroke. I guess that's why a prior knowledge about the stroke parameter variability (see Ref. 3.5) is needed.
-                                    There seems to be another ref might have some details to check, see [80] of Ref.
-Jan-30-2015         hyin            More test, okay, not much (6-7), was done. It seems we really need that prior knowledge that ignore stroke with relatively small proportion
-                                    I guess it is better to adopt some adaptive threshold rather than the fixed range suggested in Ref., let me check it.
-Jan-31-2015         hyin            Turn off the condition and repeating extaction when SNR is less than a threshold, see comments.
-                                    Tested on a, b, c, d, e, g, h, m, n, o, p, q, s, t, w, seems fine. Not sure if we need to implement the second mode or not
-                                    Probably first to learn a statistic model to see if we got enough robust estimated parameters                                                        
-Feb-11-2015         hyin            Some minor modifications for a thourough test on several classes of characters
-                                    Now it is somehow understood about the adoption of the second mode extraction in Ref., it might be useful for some cases with
-                                    failed characteristic points registration due to serverely blended components (a component is missed, as the local maximum velocity is skipped...). 
-                                    However, according to current observations, more than 90% cases can be successfully handled by just first mode. So let us first stick to it.
+Note this is neither a complete nor exact implementation of the referenced work. It might contain lots of conjectures
+and modifications according to my own understanding as some aspects are not totally clear...
 """
+
 import numpy as np 
 from scipy.special import erf
 import scipy.optimize as sciopt
