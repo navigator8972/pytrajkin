@@ -7,3 +7,4 @@ data/*
 !data/get_ujipenchar2.sh
 figs
 turing
+*.*~
