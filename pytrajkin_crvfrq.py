@@ -140,7 +140,7 @@ def get_curvature_inv_fft_transform(curvature_freq, n=None):
     '''
     if n is None:
         n = len(curvature_freq)
-    return ifft(curvature_freq, n)
+    return ifft(curvature_freq*len(curvature_freq), n)
 
 def display_frequency(sp, freq):
     '''
@@ -177,6 +177,7 @@ def curvature_freq_test():
     # ax.plot(np.arange(len(ang_t)), ang_t, '-*')
     # ax.plot(np.arange(len(curvature_t)), curvature_t)
     ax.plot(ang, np.log(curvature[0]))
+    ax.hold(True)
     plt.draw()
     ###
     ###
@@ -189,9 +190,19 @@ def curvature_freq_test():
     #see the frequency analysis and a reconstruction with perturbation in frequency domain
     freq_bins = fftfreq(len(ang), ang[1]-ang[0])
     log_curvature_freq = get_curvature_fft_transform(np.log(curvature[0]))
-    # print log_curvature_freq
+    
+    ax_freq = display_frequency(sp=log_curvature_freq, freq=freq_bins)
 
-    display_frequency(sp=log_curvature_freq, freq=freq_bins)
+    #corrupt frequency basis coefficients
+    log_curvature_freq[2] += np.random.randn() * 0.2
+    ax_freq.plot(freq_bins, log_curvature_freq)
+    #reconstruct from the corrupted frequency
+    corrupt_log_curvature = get_curvature_inv_fft_transform(log_curvature_freq)
+    ax.plot(ang, corrupt_log_curvature)
+
+    curvature_recons = np.exp(corrupt_log_curvature)
+    crv_corrupt_reconstruct = get_trajectory_from_ang_curvature_parameterization(ang[0:200], curvature_recons[0:200], dt=0.005)
+    ax_corrupt_reconstruct = utils.display_data([[crv_corrupt_reconstruct]])
 
     return
 
