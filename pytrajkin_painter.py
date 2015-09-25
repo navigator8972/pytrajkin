@@ -134,8 +134,9 @@ class PyTrajKin_Painter(QWidget):
             if self.analyzer_drawfunc is not None:
                 drawlines = self.analyzer_drawfunc(self.ax_painter, processed_trajs)
                 self.canvas.draw()
-                if len(drawlines) > 0:
-                    self.lines = self.lines + drawlines
+                if drawlines is not None:
+                    if len(drawlines) > 0:
+                        self.lines = self.lines + drawlines
             #plot processed_trajs
             # self.plot_trajs_helper(processed_trajs)
         else:

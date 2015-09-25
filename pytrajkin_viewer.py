@@ -14,7 +14,11 @@ import copy
 import numpy as np 
 import cPickle as cp
 
+from scipy.fftpack import fft, ifft, fftfreq
+
 import pytrajkin as pytk 
+import pytrajkin_painter as pytkpt
+import pytrajkin_crvfrq as pytkcf
 import utils
 
 class PyTrajKin_GUI(QMainWindow):
@@ -63,6 +67,8 @@ class PyTrajKin_GUI(QMainWindow):
         #button for train
         self.train_btn = QPushButton('Train')
         self.train_char_btn = QPushButton('Train Character')
+        #button for curvature frequency analysis
+        # self.char_crvfreq_btn = QPushButton('Curvature Frequency')
         self.char_stat_btn = QPushButton('Character Statistics')
         self.train_all_btn = QPushButton('Train All')
 
@@ -70,6 +76,7 @@ class PyTrajKin_GUI(QMainWindow):
 
         vbox_ctrl_pnl.addWidget(self.train_btn)
         vbox_ctrl_pnl.addWidget(self.train_char_btn)
+        # vbox_ctrl_pnl.addWidget(self.char_crvfreq_btn)
         vbox_ctrl_pnl.addWidget(self.char_stat_btn)
         vbox_ctrl_pnl.addWidget(self.train_all_btn)
 
@@ -84,9 +91,12 @@ class PyTrajKin_GUI(QMainWindow):
         self.tab_main = QTabWidget()
         self.tab_char = QWidget()
         self.tab_stat = QWidget()
+        #<hyin/Sep-25th-2015> tab for curvature frequency analysis
+        self.tab_crvfreq = self.create_curvature_freq_tab()
 
         self.tab_main.addTab(self.tab_char, 'Character')
         self.tab_main.addTab(self.tab_stat, 'Statistics')
+        self.tab_main.addTab(self.tab_crvfreq, 'Curvature Frequency')
 
         #for drawing part
         fig_hbox = QHBoxLayout()
@@ -168,6 +178,24 @@ class PyTrajKin_GUI(QMainWindow):
         self.main_frame.setLayout(hbox)
         self.setCentralWidget(self.main_frame)
         return
+
+    def create_curvature_freq_tab(self):
+        self.crvfrq_tabwgt = QWidget()
+        #painter
+        self.crvfrq_painter = pytkpt.PyTrajKin_Painter(analyzer=self.crvfrq_analyzer, 
+            analyzer_drawfunc=self.crvfrq_drawer)
+        #plot
+        self.crvfrq_pltfig = Figure((5.0, 4.0), dpi=100)
+        self.crvfrq_pltcanvas = FigureCanvas(self.crvfrq_pltfig)
+        self.ax_crvfrqplt = self.crvfrq_pltfig.add_subplot(111)
+
+        #layout
+        crvfrq_tab_layout = QVBoxLayout()
+        crvfrq_tab_layout.addWidget(self.crvfrq_painter)
+        crvfrq_tab_layout.addWidget(self.crvfrq_pltcanvas)
+
+        self.crvfrq_tabwgt.setLayout(crvfrq_tab_layout)
+        return self.crvfrq_tabwgt
 
     def create_status_bar(self):
         return
@@ -805,6 +833,72 @@ class PyTrajKin_GUI(QMainWindow):
         curr_data = self.data[curr_char][curr_idx]
         return curr_data
 
+    def crvfrq_analyzer(self, data):
+        #check if there is drawing on the canvas
+        if data is not None and data:
+            # print 'get drawn data'
+            letter_trajs = data
+        else:
+            # print 'get letter data'
+            #get current char for the letter trajectories
+            curr_data = self.get_current_data()
+            if curr_data is not None and curr_data:
+                letter_trajs = curr_data
+
+        res_data = dict()
+        res_data['sections'] = []
+        res_data['crvfrq'] = []
+        res_data['ang_sections'] = []
+        for strk in letter_trajs:
+            ang = pytkcf.get_continuous_ang(strk)
+            curvature, ang_sections = pytkcf.get_ang_indexed_curvature_of_t_indexed_curve(strk)
+            tmp_sctn = []
+            tmp_crvt = []
+            tmp_ang_sctn = []
+            idx = 0
+            for crvt, sctn in zip(curvature, ang_sections):
+                #for each section and corresponding log-curvature profile
+                tmp_sctn+=[strk[idx:(idx+len(sctn))]]
+                tmp_crvt+=[pytkcf.get_curvature_fft_transform(np.log(crvt))]
+                tmp_ang_sctn+=[np.linspace(sctn[0], sctn[-1], len(tmp_crvt[-1]))]
+                idx+=len(sctn)
+
+            res_data['sections'] += [tmp_sctn[:]]
+            res_data['crvfrq'] += [tmp_crvt[:]]
+            res_data['ang_sections']+=[tmp_ang_sctn[:]]
+        return res_data
+
+    def crvfrq_drawer(self, ax, data):
+        '''
+        the ax is the canvas to paint...
+        '''
+        #plot letter sections in canvas
+        letter_trajs = []
+        for strk in data['sections']:
+            for sctn in strk:
+                tmp_letter_traj, = ax.plot(sctn[:, 0], sctn[:, 1], linewidth=2.0)
+                letter_trajs+=[tmp_letter_traj]
+                ax.hold(True)
+        ax.hold(False)
+        #frequency analysis
+        for strk, strk_ang in zip(data['crvfrq'], data['ang_sections']):
+            for crvt_sctn, ang_sctn in zip(strk, strk_ang):
+                freq_bins = fftfreq(n=len(ang_sctn), d=ang_sctn[1]-ang_sctn[0])
+                #cut to show only low frequency part
+                n_freq = len(ang_sctn)/2+1
+                #<hyin/Sep-25th-2015> need more investigation to see the meaning of fftfreq
+                #some threads on stackoverflow suggests the frequency should be normalized by the length of array
+                #but the result seems weird...                
+                self.ax_crvfrqplt.plot(np.abs(freq_bins[0:n_freq])*2*np.pi, np.abs(crvt_sctn[0:n_freq]))
+                self.ax_crvfrqplt.set_ylabel('Normed Amplitude')
+                self.ax_crvfrqplt.set_xlabel('Logarithm of Frequency')
+                #cut the xlim
+                self.ax_crvfrqplt.set_xlim([0, 8])
+                self.ax_crvfrqplt.hold(True)
+        self.ax_crvfrqplt.hold(False)
+        self.crvfrq_pltcanvas.draw()
+
+        return letter_trajs
 
 def main():
     app = QApplication(sys.argv)

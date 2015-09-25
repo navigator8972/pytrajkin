@@ -47,7 +47,8 @@ def find_monotonic_sections(seq):
             sections.append(seq[idx:ptr])
             idx = ptr
         ptr+=1
-    sections.append(seq[idx:ptr])
+    if idx != ptr:
+        sections.append(seq[idx:ptr])
 
     return sections
 
@@ -84,6 +85,10 @@ def get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear', n_sa
         s = interp1d(x=ang_stn, y=curvature_t[idx:(idx+len(ang_stn))], kind=interp_kind)
 
         n_samples_for_section = int(np.abs(ang_stn[-1] - ang_stn[0])/(2*np.pi) * n_samples_per_2pi)
+        #<hyin/Sep-25th-2015> for tiny or straight stroke where the difference of angular position is small
+        #return a fixed amount of sample points - 100
+        if n_samples_for_section < 2:
+            n_samples_for_section = 100
         ang_sample_pnts = np.linspace(ang_stn[0], ang_stn[-1], n_samples_for_section)
         curvature_section = s(ang_sample_pnts)
         curvature.append(np.copy(curvature_section))
