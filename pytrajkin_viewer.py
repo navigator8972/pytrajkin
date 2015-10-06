@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QTAgg as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.pyplot import cm 
 matplotlib.rc('xtick', labelsize=8) 
 matplotlib.rc('ytick', labelsize=8) 
 
@@ -848,23 +849,29 @@ class PyTrajKin_GUI(QMainWindow):
         res_data = dict()
         res_data['sections'] = []
         res_data['crvfrq'] = []
+        res_data['velfrq'] = [] 
         res_data['ang_sections'] = []
         for strk in letter_trajs:
-            ang = pytkcf.get_continuous_ang(strk)
-            curvature, ang_sections = pytkcf.get_ang_indexed_curvature_of_t_indexed_curve(strk)
+            ang = pytkcf.get_continuous_ang(np.array(strk))
+            curvature, ang_sections = pytkcf.get_ang_indexed_curvature_of_t_indexed_curve(np.array(strk))
+            velocity, _ = pytkcf.get_ang_indexed_velocity_of_t_indexed_curve(np.array(strk))
             tmp_sctn = []
             tmp_crvt = []
+            tmp_velt = []
             tmp_ang_sctn = []
             idx = 0
-            for crvt, sctn in zip(curvature, ang_sections):
+            for crvt, velt, sctn in zip(curvature, velocity, ang_sections):
                 #for each section and corresponding log-curvature profile
+                #ignore short tiny sections...
                 tmp_sctn+=[strk[idx:(idx+len(sctn))]]
                 tmp_crvt+=[pytkcf.get_curvature_fft_transform(np.log(crvt))]
+                tmp_velt+=[pytkcf.get_curvature_fft_transform(np.log(velt))]
                 tmp_ang_sctn+=[np.linspace(sctn[0], sctn[-1], len(tmp_crvt[-1]))]
                 idx+=len(sctn)
 
             res_data['sections'] += [tmp_sctn[:]]
             res_data['crvfrq'] += [tmp_crvt[:]]
+            res_data['velfrq'] += [tmp_velt[:]]
             res_data['ang_sections']+=[tmp_ang_sctn[:]]
         return res_data
 
@@ -872,29 +879,44 @@ class PyTrajKin_GUI(QMainWindow):
         '''
         the ax is the canvas to paint...
         '''
+        #prepare color
+        tol_nr_sctn = np.sum([len(strk) for strk in data['sections']])
+        color_lettertraj=iter(cm.rainbow(np.linspace(0,1,tol_nr_sctn)))
+        color_crvfrq=iter(cm.rainbow(np.linspace(0,1,tol_nr_sctn)))
         #plot letter sections in canvas
         letter_trajs = []
         for strk in data['sections']:
             for sctn in strk:
-                tmp_letter_traj, = ax.plot(sctn[:, 0], sctn[:, 1], linewidth=2.0)
+                c = next(color_lettertraj)
+                tmp_letter_traj, = ax.plot(np.array(sctn)[:, 0], np.array(sctn)[:, 1], linewidth=2.0, color=c)
                 letter_trajs+=[tmp_letter_traj]
                 ax.hold(True)
         ax.hold(False)
         #frequency analysis
-        for strk, strk_ang in zip(data['crvfrq'], data['ang_sections']):
-            for crvt_sctn, ang_sctn in zip(strk, strk_ang):
+        for strk_crv, strk_vel, strk_ang in zip(data['crvfrq'], data['velfrq'], data['ang_sections']):
+            for crvt_sctn, vel_sctn, ang_sctn in zip(strk_crv, strk_vel, strk_ang):
                 freq_bins = fftfreq(n=len(ang_sctn), d=ang_sctn[1]-ang_sctn[0])
                 #cut to show only low frequency part
                 n_freq = len(ang_sctn)/2+1
                 #<hyin/Sep-25th-2015> need more investigation to see the meaning of fftfreq
                 #some threads on stackoverflow suggests the frequency should be normalized by the length of array
                 #but the result seems weird...                
-                self.ax_crvfrqplt.plot(np.abs(freq_bins[0:n_freq])*2*np.pi, np.abs(crvt_sctn[0:n_freq]))
+                #power spectrum coefficient, see Huh et al, Spectrum of power laws for curved hand movements
+                freq = np.abs(freq_bins[0:n_freq]*2*np.pi)
+                beta = 2.0/3.0 * (1+freq**2/2.0)/(1+freq**2+freq**4/15.0)
+                # print 'new section'
+                # print freq
+                # print beta
+                # print np.abs(crvt_sctn[0:n_freq])
+                c = next(color_crvfrq)
+                self.ax_crvfrqplt.plot(freq, np.abs(crvt_sctn[0:n_freq])*beta, color=c)
+                self.ax_crvfrqplt.hold(True)
+                self.ax_crvfrqplt.plot(freq, np.abs(vel_sctn[0:n_freq]), color=c, linestyle='dashed')
                 self.ax_crvfrqplt.set_ylabel('Normed Amplitude')
-                self.ax_crvfrqplt.set_xlabel('Logarithm of Frequency')
+                self.ax_crvfrqplt.set_xlabel('Frequency')
                 #cut the xlim
                 self.ax_crvfrqplt.set_xlim([0, 8])
-                self.ax_crvfrqplt.hold(True)
+                self.ax_crvfrqplt.set_ylim([0.0, 1.0])
         self.ax_crvfrqplt.hold(False)
         self.crvfrq_pltcanvas.draw()
 

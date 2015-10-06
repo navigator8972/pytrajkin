@@ -1,4 +1,5 @@
 .bzr
+*.p
 *.pyc
 init_env.py
 iterate.dat

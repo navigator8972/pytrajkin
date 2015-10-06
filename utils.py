@@ -272,9 +272,14 @@ def display_data(letters):
                 ax.plot(s[:, 0], -s[:, 1])
             else:
                 #compact format, extract data
-                x_data = s[0:(len(s)-1)/2]
-                y_data = s[(len(s)-1)/2:(len(s)-1)]
-                ax.plot(x_data, -y_data)
+                if len(s) % 2 == 1:
+                    x_data = s[0:(len(s)-1)/2]
+                    y_data = s[(len(s)-1)/2:(len(s)-1)]
+                    ax.plot(x_data, -y_data)
+                else:
+                    x_data = s[0:len(s)/2]
+                    y_data = s[len(s)/2:]
+                    ax.plot(x_data, -y_data)
     ax.set_xlabel('X Coordinate (Unit)')
     ax.set_ylabel('Y Coordinate (Unit)')
     ax.set_aspect('equal')
@@ -659,3 +664,52 @@ def hausdorff_distance(C1, C2):
 
     return (H1 + H2) / 2.
 
+def get_mean_letters(data):
+    #for a group of letters, get mean letter for each case of stroke numbers
+    res = []
+    ddict = defaultdict(list)
+    for d in data:
+        ddict[len(d)].append(np.array(d))
+    for n_strk in ddict.keys():
+        print 'Getting mean letters with {0} strokes.'.format(n_strk)
+        mean_data = None
+        for letter in ddict[n_strk]:
+            if mean_data is None:
+                mean_data = copy.copy(letter)
+            else:
+                mean_data = mean_data + letter
+        mean_data = mean_data / len(ddict[n_strk])
+        res.append(mean_data)
+
+    return ddict, res
+
+def difference_of_two_letters(d1, d2):
+    #euclidean distance between the two letters
+    #they must have same number of strokes...
+    if len(d1) != len(d2):
+        print 'The number of strokes are not equal!'
+        return None
+    err = 0.0
+    #use the first point as the anchor
+
+    for i_strk in range(len(d1)):
+        displacement = d2[i_strk][0] - d1[i_strk][0]
+        err+=np.sum(np.sum((d2[i_strk] - d1[i_strk] - displacement)**2))/float(len(d1[i_strk]))
+        print 'Accumulated error till stroke {0}:'.format(i_strk+1), err
+
+    return err/float(len(d1))
+
+def from_flatten_to_2D(letters):
+    #for a given letter, convert it from the flatten form to 2D
+    convt_letters=[]
+    for l in letters:
+        tmp_letter = []
+        for s in l:
+            if len(s) % 2 == 1:
+                #ignore the fixed time horizon
+                tmp_letter.append(np.reshape(s[0:-1], (2, -1)).T)
+            else:
+                #compact format, extract data
+                tmp_letter.append(np.reshape(s, (2, -1)).T)
+        convt_letters.append(tmp_letter)
+    return convt_letters

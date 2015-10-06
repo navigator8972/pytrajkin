@@ -78,20 +78,22 @@ def get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear', n_sa
     idx = 0
     for ang_stn in ang_sections:
         #for each monotonical part
-        #fit and resample with equal angular position interval
-        #interpolation for this section
-        #<hyin/Sep-23rd-2015> Cubic type is much slower than linear though not sure
-        #if it was necessary for nontrivial angular position profile
-        s = interp1d(x=ang_stn, y=curvature_t[idx:(idx+len(ang_stn))], kind=interp_kind)
+        #<hyin/Sep-29th-2015> ignore the tiny part that contains only one point...
+        if len(ang_stn) >= 2:
+            #fit and resample with equal angular position interval
+            #interpolation for this section
+            #<hyin/Sep-23rd-2015> Cubic type is much slower than linear though not sure
+            #if it was necessary for nontrivial angular position profile
+            s = interp1d(x=ang_stn, y=curvature_t[idx:(idx+len(ang_stn))], kind=interp_kind)
 
-        n_samples_for_section = int(np.abs(ang_stn[-1] - ang_stn[0])/(2*np.pi) * n_samples_per_2pi)
-        #<hyin/Sep-25th-2015> for tiny or straight stroke where the difference of angular position is small
-        #return a fixed amount of sample points - 100
-        if n_samples_for_section < 2:
-            n_samples_for_section = 100
-        ang_sample_pnts = np.linspace(ang_stn[0], ang_stn[-1], n_samples_for_section)
-        curvature_section = s(ang_sample_pnts)
-        curvature.append(np.copy(curvature_section))
+            n_samples_for_section = int(np.abs(ang_stn[-1] - ang_stn[0])/(2*np.pi) * n_samples_per_2pi)
+            #<hyin/Sep-25th-2015> for tiny or straight stroke where the difference of angular position is small
+            #return a fixed amount of sample points - 100
+            if n_samples_for_section < 2:
+                n_samples_for_section = 100
+            ang_sample_pnts = np.linspace(ang_stn[0], ang_stn[-1], n_samples_for_section)
+            curvature_section = s(ang_sample_pnts)
+            curvature.append(np.copy(curvature_section))
 
         # ax.plot(ang_stn, curvature_t[idx:idx+len(ang_stn)])
         # ax.plot(ang_sample_pnts, curvature_section)
@@ -100,6 +102,48 @@ def get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear', n_sa
         idx+=len(ang_stn)
 
     return curvature, ang_sections
+
+def get_ang_indexed_velocity_of_t_indexed_curve(crv, interp_kind='linear', n_samples_per_2pi=100):
+    '''
+    Input:
+    crv:                    a 2D-array representing a curve indexed by t, each row denotes a 2D coordinate
+    n_samples_per_2pi:      how many sample points are used for 2 PI section
+    Output:
+    velocity: linear velocity indexed by angular position
+    note this would be an array of sections, each of which is for a monotonical part
+    '''
+    #<hyin/Sep-23rd> it is necessary to have ang_t with the same length as the crv
+    #this seems crucial to improve the reconstruction accuracy
+    ang_t = get_continuous_ang(crv)
+    velocity_t = get_vel_profile(crv)
+
+    ang_sections = find_monotonic_sections(ang_t)
+
+    velocity = []
+    idx = 0
+    for ang_stn in ang_sections:
+        #for each monotonical part
+        #for each monotonical part
+        #<hyin/Sep-29th-2015> ignore the tiny part that contains only one point...
+        if len(ang_stn) >= 2:
+            #fit and resample with equal angular position interval
+            #interpolation for this section
+            #<hyin/Sep-23rd-2015> Cubic type is much slower than linear though not sure
+            #if it was necessary for nontrivial angular position profile
+            s = interp1d(x=ang_stn, y=velocity_t[idx:(idx+len(ang_stn))], kind=interp_kind)
+
+            n_samples_for_section = int(np.abs(ang_stn[-1] - ang_stn[0])/(2*np.pi) * n_samples_per_2pi)
+            #<hyin/Sep-25th-2015> for tiny or straight stroke where the difference of angular position is small
+            #return a fixed amount of sample points - 100
+            if n_samples_for_section < 2:
+                n_samples_for_section = 100
+            ang_sample_pnts = np.linspace(ang_stn[0], ang_stn[-1], n_samples_for_section)
+            vel_section = s(ang_sample_pnts)
+            velocity.append(np.copy(vel_section))
+
+        idx+=len(ang_stn)
+
+    return velocity, ang_sections
 
 def get_trajectory_from_ang_curvature_parameterization(ang, curvature, dt=0.01):
     '''
@@ -157,14 +201,15 @@ def display_frequency(sp, freq):
     plt.plot(freq, np.abs(sp))
     ax.hold(True)
     ax.set_ylabel('Normed Amplitude')
-    ax.set_xlabel('Frequency/2PI')
+    ax.set_xlabel('Frequency')
+    ax.set_xlim([0, 8])
     plt.draw()
        
     return ax
 
 def curvature_freq_test():
 
-    crv = get_curvature_frequency_based_curve(3.0/2.0)
+    crv = get_curvature_frequency_based_curve(12.0/2.0)
 
     # get curvature
     curvature, ang_sections = get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear')
@@ -193,7 +238,7 @@ def curvature_freq_test():
     ax_reconstruct = utils.display_data([[crv_reconstruct]])
 
     #see the frequency analysis and a reconstruction with perturbation in frequency domain
-    freq_bins = fftfreq(len(ang), ang[1]-ang[0])
+    freq_bins = fftfreq(len(ang), ang[1]-ang[0])*2*np.pi
     log_curvature_freq = get_curvature_fft_transform(np.log(curvature[0]))
     
     ax_freq = display_frequency(sp=log_curvature_freq, freq=freq_bins)
@@ -210,6 +255,16 @@ def curvature_freq_test():
     ax_corrupt_reconstruct = utils.display_data([[crv_corrupt_reconstruct]])
 
     return
+
+def get_vel_profile(stroke):
+    """
+    get the velocity profile for a stroke
+    input is an array of position coordinates
+    """
+    vel_x = np.gradient(stroke[:, 0])
+    vel_y = np.gradient(stroke[:, 1])
+    vel_prf = np.sqrt(vel_x**2+vel_y**2)
+    return vel_prf
 
 def get_continuous_ang(stroke):
     """
