@@ -200,7 +200,6 @@ def smooth_data(data_set):
 
 def normalize_trajs_helper(trajs):
     #merge strokes to find center & size
-
     tmp_traj = np.concatenate(trajs, axis=0)
     # print tmp_traj
     traj_center = np.mean(tmp_traj, axis=0)

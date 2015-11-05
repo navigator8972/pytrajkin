@@ -4,8 +4,10 @@ Frequency analysis and reconstruction of curvature features.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.pyplot import cm 
 from scipy.interpolate import interp1d
 from scipy.fftpack import fft, ifft, fftfreq
+import scipy.ndimage as spi
 
 import utils
 
@@ -209,7 +211,7 @@ def display_frequency(sp, freq):
 
 def curvature_freq_test():
 
-    crv = get_curvature_frequency_based_curve(12.0/2.0)
+    crv = get_curvature_frequency_based_curve(32.0/2.0)
 
     # get curvature
     curvature, ang_sections = get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear')
@@ -256,6 +258,30 @@ def curvature_freq_test():
 
     return
 
+def curvature_and_ang_frequency_for_t_indexed_curve(crv, remove_lowfrq=False):
+    if remove_lowfrq:
+        time_len = crv.shape[0]
+        if time_len > 3:
+            #smooth the data, gaussian filter
+            smoothed_crv = np.array([spi.gaussian_filter(dim, 3) for dim in crv.transpose()]).transpose()
+            work_crv=crv-smoothed_crv
+        else:
+            print 'Too short stroke, use the original data'
+            work_crv=crv
+    else:
+        work_crv=crv
+    curvature = get_curvature_of_t_indexed_curve(work_crv)
+    ang = get_continuous_ang(work_crv)
+    t_idx = np.arange(len(work_crv))
+    freq_bins = fftfreq(len(t_idx), t_idx[1]-t_idx[0])*2*np.pi
+    #fft
+    crv_frq = get_curvature_fft_transform(curvature)
+    ang_frq = get_curvature_fft_transform(ang)
+    display_frequency(sp=crv_frq, freq=freq_bins)
+    display_frequency(sp=ang_frq, freq=freq_bins)
+
+    return
+
 def get_vel_profile(stroke):
     """
     get the velocity profile for a stroke
@@ -265,6 +291,88 @@ def get_vel_profile(stroke):
     vel_y = np.gradient(stroke[:, 1])
     vel_prf = np.sqrt(vel_x**2+vel_y**2)
     return vel_prf
+
+def analyze_letter(letter_trajs):
+    """
+    analyze a given letter...
+    """
+    res_data = dict()
+    res_data['sections'] = []
+    res_data['crvfrq'] = []
+    res_data['velfrq'] = [] 
+    res_data['ang_sections'] = []
+    for strk in letter_trajs:
+        ang = get_continuous_ang(np.array(strk))
+        curvature, ang_sections = get_ang_indexed_curvature_of_t_indexed_curve(np.array(strk))
+        velocity, _ = get_ang_indexed_velocity_of_t_indexed_curve(np.array(strk))
+        tmp_sctn = []
+        tmp_crvt = []
+        tmp_velt = []
+        tmp_ang_sctn = []
+        idx = 0
+        for crvt, velt, sctn in zip(curvature, velocity, ang_sections):
+            #for each section and corresponding log-curvature profile
+            #ignore short tiny sections...
+            tmp_sctn+=[strk[idx:(idx+len(sctn))]]
+            tmp_crvt+=[get_curvature_fft_transform(np.log(crvt))]
+            tmp_velt+=[get_curvature_fft_transform(np.log(velt))]
+            tmp_ang_sctn+=[np.linspace(sctn[0], sctn[-1], len(tmp_crvt[-1]))]
+            idx+=len(sctn)
+
+        res_data['sections'] += [tmp_sctn[:]]
+        res_data['crvfrq'] += [tmp_crvt[:]]
+        res_data['velfrq'] += [tmp_velt[:]]
+        res_data['ang_sections']+=[tmp_ang_sctn[:]]
+    return res_data
+
+def display_analyze_results(data):
+    plt.ion()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    fig_crvfrq = plt.figure()
+    ax_crvfrqplt = fig_crvfrq.add_subplot(111)
+    #prepare color
+    tol_nr_sctn = np.sum([len(strk) for strk in data['sections']])
+    color_lettertraj=iter(cm.rainbow(np.linspace(0,1,tol_nr_sctn)))
+    color_crvfrq=iter(cm.rainbow(np.linspace(0,1,tol_nr_sctn)))
+    #plot letter sections in canvas
+    letter_trajs = []
+    for strk in data['sections']:
+        for sctn in strk:
+            c = next(color_lettertraj)
+            tmp_letter_traj, = ax.plot(np.array(sctn)[:, 0], -np.array(sctn)[:, 1], linewidth=2.0, color=c)
+            letter_trajs+=[tmp_letter_traj]
+            ax.hold(True)
+    ax.hold(False)
+    #frequency analysis
+    for strk_crv, strk_vel, strk_ang in zip(data['crvfrq'], data['velfrq'], data['ang_sections']):
+        for crvt_sctn, vel_sctn, ang_sctn in zip(strk_crv, strk_vel, strk_ang):
+            freq_bins = fftfreq(n=len(ang_sctn), d=ang_sctn[1]-ang_sctn[0])
+            #cut to show only low frequency part
+            n_freq = len(ang_sctn)/2+1
+            #<hyin/Sep-25th-2015> need more investigation to see the meaning of fftfreq
+            #some threads on stackoverflow suggests the frequency should be normalized by the length of array
+            #but the result seems weird...                
+            #power spectrum coefficient, see Huh et al, Spectrum of power laws for curved hand movements
+            freq = np.abs(freq_bins[0:n_freq]*2*np.pi)
+            beta = 2.0/3.0 * (1+freq**2/2.0)/(1+freq**2+freq**4/15.0)
+            # print 'new section'
+            # print freq
+            # print beta
+            # print np.abs(crvt_sctn[0:n_freq])
+            c = next(color_crvfrq)
+            ax_crvfrqplt.plot(freq, np.abs(crvt_sctn[0:n_freq])*beta, color=c)
+            ax_crvfrqplt.hold(True)
+            ax_crvfrqplt.plot(freq, np.abs(vel_sctn[0:n_freq]), color=c, linestyle='dashed')
+            ax_crvfrqplt.set_ylabel('Normed Amplitude')
+            ax_crvfrqplt.set_xlabel('Frequency')
+            #cut the xlim
+            ax_crvfrqplt.set_xlim([0, 8])
+            ax_crvfrqplt.set_ylim([0.0, 1.0])
+    ax_crvfrqplt.hold(False)
+    plt.draw()
+    return
+
 
 def get_continuous_ang(stroke):
     """

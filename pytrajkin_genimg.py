@@ -1,6 +1,7 @@
 import sys, os
 from collections import defaultdict
 import copy
+import cPickle as cp
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import animation
@@ -96,9 +97,11 @@ def get_synthetic_data_images(char, mdl_folder='char_mdls', n_samples=1, output_
     plt.tick_params(axis='both', which='both', bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off')
 
     #generate samples...
+    synthetic_samples = []
     if not animation:
         for sample_idx in range(n_samples):
             sample_data = trajkin_mdl.sample()
+            synthetic_samples.append(sample_data)
             ax_static = image_for_char(ax_static, sample_data)
             extent = ax_static.get_window_extent().transformed(fig_static.dpi_scale_trans.inverted())
             #prepare file name
@@ -144,6 +147,9 @@ def get_synthetic_data_images(char, mdl_folder='char_mdls', n_samples=1, output_
                 timelen = np.random.randn() * timelen_std * 0.1 + timelen_mean
                 timelen_array.append([timelen])
             sample_data = np.concatenate([sample_data, np.array(timelen_array)], axis=1)
+
+            synthetic_samples.append(resample_data_to_2d_array_list(sample_data, rate=30))
+
             anim = animation_for_char(fig_dyn, ax_dyn, sample_data, rate=30)
 
             #prepare file name
@@ -153,8 +159,12 @@ def get_synthetic_data_images(char, mdl_folder='char_mdls', n_samples=1, output_
             anim.save(fpath, writer='imagemagick', fps=30);
 
     # plt.show()
+    #save data
+    data_fname = '{0}_synthetic_sample_data.p'.format(char[0])
+    data_fpath = os.path.join(output_path_char, data_fname)
+    cp.dump(synthetic_samples, open(data_fpath, 'wb'))
 
-    return
+    return synthetic_samples
 
 def image_for_char(ax, sample_data):
     if ax is None:
@@ -200,6 +210,21 @@ def prepare_stroke_timelen_stat(trajmdl):
                 mean_dict[strk_num].append(np.mean(strk_data[:, -1]))
                 std_dict[strk_num].append(np.std(strk_data[:, -1]))
     return mean_dict, std_dict
+
+def resample_data_to_2d_array_list(sample_data, rate=30):
+    '''
+    resample the data to a 2d array list...
+    '''
+    timelen_array = sample_data[:, -1]
+    nframes_array = timelen_array * rate * 3
+    motion_data = []
+    for strk_idx in range(len(nframes_array)):
+        strk_data = np.reshape(sample_data[strk_idx][ 0:-1], (2, -1)).T
+        # print len(strk_data), int(nframes_array[strk_idx])
+        resample_strk_data = utils.interp_traj(strk_data, int(nframes_array[strk_idx]))
+        motion_data.append(resample_strk_data)
+
+    return motion_data
 
 def animation_for_char(fig, ax, sample_data, rate=30):
     if ax is None:
