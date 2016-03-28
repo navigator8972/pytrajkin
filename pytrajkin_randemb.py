@@ -113,7 +113,7 @@ class TrajKinMdl:
                 #extract mean trajectory
                 mean_sample = np.mean(d, axis=0)
                 mean_traj = np.reshape(mean_sample, (2, -1)).transpose()
-                kin_parms = pytkrxz.rxzero_train(mean_traj, verbose=False)
+                kin_parms = pytkrxz.rxzero_train(mean_traj, global_opt_itrs=1, verbose=False)
                 kinparms_by_node[tree_idx, leaf_idx] = [mean_traj[0, :], kin_parms]
 
         tmp_rf_mdl['kinparms_dict'] = kinparms_by_node
@@ -645,3 +645,27 @@ def trajkinsyn_var_test(fname):
     plt.ioff()
 
     return trajkin_mdl
+
+import timeit
+
+def training_time_test(data, number=5):
+    time_cost = []
+    for i in range(number):
+        #create a TrajKinMdl
+        test_mdl =  TrajKinMdl(data=data, use_kin=True)
+        start_time = timeit.default_timer()
+        test_mdl.train()
+        elapsed = timeit.default_timer() - start_time
+        time_cost.append(elapsed)
+
+    return time_cost
+
+def sampling_time_test(mdl, number=100):
+    time_cost = []
+    for i in range(number):
+        start_time = timeit.default_timer()
+        sample_data = mdl.sample()
+        elapsed = timeit.default_timer() - start_time
+        time_cost.append(elapsed)
+
+    return time_cost

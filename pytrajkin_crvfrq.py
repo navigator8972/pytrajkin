@@ -211,7 +211,7 @@ def display_frequency(sp, freq):
 
 def curvature_freq_test():
 
-    crv = get_curvature_frequency_based_curve(32.0/2.0)
+    crv = get_curvature_frequency_based_curve(3.0/2.0)
 
     # get curvature
     curvature, ang_sections = get_ang_indexed_curvature_of_t_indexed_curve(crv, interp_kind='linear')
@@ -224,13 +224,15 @@ def curvature_freq_test():
     ang_t = get_continuous_ang(crv)
 
     plt.ion()
+
     fig = plt.figure()
     ax = fig.add_subplot(111)
     # ax.plot(np.arange(len(ang_t)), ang_t, '-*')
     # ax.plot(np.arange(len(curvature_t)), curvature_t)
-    ax.plot(ang, np.log(curvature[0]))
+    ax.plot(ang, np.log(curvature[0]), 'r', linewidth=3.5)
     ax.hold(True)
     plt.draw()
+    raw_input()
     ###
     ###
     ###

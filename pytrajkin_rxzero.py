@@ -1,12 +1,12 @@
 """
 A module to implement Robust XZERO algorithm to extract Sig-normal model parameters
-See Ref. O'Reilly and Plamondon, Development of a Sigma-Lognormal representation for on-line signatures 
+See Ref. O'Reilly and Plamondon, Development of a Sigma-Lognormal representation for on-line signatures
 
 Note this is neither a complete nor exact implementation of the referenced work. It might contain lots of conjectures
 and modifications according to my own understanding as some aspects are not totally clear...
 """
 
-import numpy as np 
+import numpy as np
 from scipy.special import erf
 import scipy.optimize as sciopt
 import matplotlib.pyplot as plt
@@ -17,8 +17,6 @@ import utils
 
 #constant...
 sqrt_2 = np.sqrt(2)
-
-
 
 def vel_profile_registration(vel_profile, vel_max_lst=[]):
     """
@@ -71,7 +69,7 @@ def vel_profile_registration(vel_profile, vel_max_lst=[]):
     else:
         vel_max=vel_max_lst[0]
     t3_array = [t3 for t3 in t3_array if vel_profile[t3] * 12 >= vel_max]
-            
+
     for t3 in t3_array:
         #the scan is not totally robust, need further investigation. Currently just use this...
         #from t3 search along the two directions...
@@ -95,7 +93,7 @@ def vel_profile_registration(vel_profile, vel_max_lst=[]):
             #it is unlikely to happen, but for the first stroke, probably we need start of stroke as time index 0
             t1_array.append(0)
         if not t2_found:
-            t2_array.append(int((t1_array[-1]+t3)/2.))              
+            t2_array.append(int((t1_array[-1]+t3)/2.))
         # elif float(t2_array[-1] - t3) / (t3 - t1_array[-1]) > 0.9:
         #   t2_array[-1] = int((t1_array[-1]+t3)/2.)    #too close to t3
         # elif float(t2_array[-1] - t3) / (t3 - t1_array[-1]) < 0.1:
@@ -172,7 +170,7 @@ def vel_profile_reg_test(vel_profile):
     #for each registration points...
     colors = ['r', 'y', 'k', 'g', 'w']
     for reg_pnt_idx in range(5):
-        ax.plot(reg_pnts[:, reg_pnt_idx].transpose(), 
+        ax.plot(reg_pnts[:, reg_pnt_idx].transpose(),
             vel_profile[reg_pnts[:, reg_pnt_idx].transpose()],
             colors[reg_pnt_idx]+'o')
     plt.ioff()
@@ -183,6 +181,62 @@ def vel_profile_reg_test(vel_profile):
     ax_acc.plot(range(len(acc_profile)), acc_profile)
     plt.show()
     return
+
+def rxzero_lognormal_grad(parms, t_idx):
+    """
+    L(parm) = D / (sqrt(2*pi) * sigma * (t - t0)) * e ^{ -(ln(t-t0) - mu)^2 / (2*sigma^2)}
+    parm = D, t0, mu, sigma
+    """
+    D, t0, mu, sigma = parms
+    t_minus_t0 = t_idx - t0
+    thres = 1e-6
+    sigma = thres if sigma < thres else sigma
+
+    res = np.zeros((len(t_idx), len(parms)))
+    dLdD = 1. / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2))
+    dLdt0 = D / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)**2) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2)) + \
+            D / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2)) * \
+            (np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)/(sigma**2) / (t_minus_t0[t_minus_t0 >= thres]+1e-5)
+    dLdmu = D / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2)) * \
+            (np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)/(sigma**2)
+    dLdsig = - D / (sigma**2 * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2)) + \
+            D / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2)) * \
+            (np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2 / sigma**3
+
+    #an array of gradient entries for an array of time indices
+    #the time indices are associated to the row dimension
+    res[t_minus_t0 >= thres, :] = np.array([dLdD, dLdt0, dLdmu, dLdsig]).T
+    return res
+
+def rxzero_lognormal_grad_test():
+    """
+    Unit test for the core lognormal grad function
+    """
+    D = np.random.rand() * 1.5
+    t0 = np.random.rand() * 0.3
+    mu = np.random.rand() * 0.5
+    sigma = np.random.rand() * 0.5 + 0.1
+    test_parm = [D, t0, mu, sigma]
+
+    t_array = np.linspace(0.0, 1.0, 100)
+    analytical_grad = rxzero_lognormal_grad(test_parm, t_array)
+    #finite difference
+    EPS = 1e-5
+    num_grad = []
+    for idx, parm in enumerate(test_parm):
+        parm_plus = copy.copy(test_parm)
+        parm_plus[idx] += EPS
+        parm_neg = copy.copy(test_parm)
+        parm_neg[idx] -= EPS
+        eval_plus = rxzero_vel_amp_eval(parm_plus, t_array)
+        eval_neg = rxzero_vel_amp_eval(parm_neg, t_array)
+        tmp_grad = (eval_plus - eval_neg)/(2.0 * EPS)
+        num_grad.append(tmp_grad)
+
+    num_grad = np.array(num_grad).T
+    grad_diff = np.mean(np.sum((analytical_grad - num_grad)**2, axis=1))
+    print 'Difference:', grad_diff
+    return grad_diff
 
 def rxzero_vel_amp_eval(parm, t_idx):
     """
@@ -199,11 +253,24 @@ def rxzero_vel_amp_eval(parm, t_idx):
     t_minus_t0 = t_idx - t0
     #truncation to keep time larger than 0
     thres = 1e-6
+    #regularize sig
+    sigma = thres if sigma < thres else sigma
     #t_minus_t0[t_minus_t0 < thres] = thres
     res = np.zeros(len(t_idx))
     res[t_minus_t0 < thres] = 0.0
     res[t_minus_t0 >= thres] = D / (sigma * np.sqrt(2 * np.pi) * (t_minus_t0[t_minus_t0 >= thres]+1e-5)) * np.exp((np.log(t_minus_t0[t_minus_t0 >= thres]) - mu)**2/(-2*sigma**2))
 
+    return res
+
+def rxzero_vel_amp_eval_grad(parm, t_idx):
+    if len(parm) == 6:
+        D, t0, mu, sigma, theta_s, theta_e = parm
+    elif len(parm) == 4:
+        D, t0, mu, sigma = parm
+    else:
+        print 'Invalid length of parm...'
+        return None
+    res = rxzero_lognormal_grad(parm, t_idx)
     return res
 
 def rxzero_normal_Phi_eval(parm, t_idx):
@@ -217,11 +284,74 @@ def rxzero_normal_Phi_eval(parm, t_idx):
     #truncation to keep time larger than 0
     thres = 1e-6
     t_minus_t0[t_minus_t0 < thres] = thres
+    sigma = thres if sigma < thres else sigma
     #take log, mu and sigma to get the input argument
     z = (np.log(t_minus_t0) - mu) / sigma
     #evaluate erf function
     res = theta_s + (theta_e - theta_s) / 2 * (1 + erf(z))
     return res
+
+def rxzero_normal_Phi_eval_grad(parm, t_idx):
+    #see wikipedia for the derivative of erf function
+    #derf(z)/dz = 2/sqrt(pi) * e^(-z^2)
+    D, t0, mu, sigma, theta_s, theta_e = parm
+    #argument for the erf function
+    t_minus_t0 = t_idx - t0
+    #truncation to keep time larger than 0
+    thres = 1e-6
+    t_minus_t0[t_minus_t0 < thres] = thres
+    sigma = thres if sigma < thres else sigma
+    #take log, mu and sigma to get the input argument
+    z = (np.log(t_minus_t0) - mu) / sigma
+
+    dLdz = 2.0 / np.sqrt(np.pi) * np.exp(-z**2)
+    dLdD = np.zeros(len(t_idx)) * dLdz
+    dLdt0 = - 1./(sigma * t_minus_t0) * dLdz
+    dLdt0[t_minus_t0 < thres] = 0.0
+    dLdmu = - 1./sigma  * dLdz
+    dLdsigma = -z/sigma * dLdz
+
+    res = np.zeros((len(t_idx), len(parm)))
+    res[:, 0:4] = (theta_e - theta_s) / 2 * np.array([dLdD, dLdt0, dLdmu, dLdsigma]).T
+
+    dLdte = 1./2 * (1 + erf(z))
+    dLdts = 1. - dLdte
+    res[:, 4:6] = np.array([dLdts, dLdte]).T
+    return res
+
+def rxzero_normal_Phi_eval_grad_test():
+    """
+    Unit test for Phi evaluation gradient function
+    """
+    D = np.random.rand() * 1.5
+    t0 = np.random.rand() * 0.3
+    mu = np.random.rand() * 0.5
+    sigma = np.random.rand() * 0.5 + 0.1
+
+    theta_s = np.random.rand() * np.pi
+    theta_e = np.random.rand() * np.pi
+
+    test_parm = [D, t0, mu, sigma, theta_s, theta_e]
+
+    t_array = np.linspace(0.0, 1.0, 100)
+    analytical_grad = rxzero_normal_Phi_eval_grad(test_parm, t_array)
+    #finite difference
+    EPS = 1e-5
+    num_grad = []
+    for idx, parm in enumerate(test_parm):
+        parm_plus = copy.copy(test_parm)
+        parm_plus[idx] += EPS
+        parm_neg = copy.copy(test_parm)
+        parm_neg[idx] -= EPS
+        eval_plus = rxzero_normal_Phi_eval(parm_plus, t_array)
+        eval_neg = rxzero_normal_Phi_eval(parm_neg, t_array)
+        tmp_grad = (eval_plus - eval_neg)/(2.0 * EPS)
+        num_grad.append(tmp_grad)
+
+    num_grad = np.array(num_grad).T
+    grad_diff = np.mean(np.sum((analytical_grad - num_grad)**2, axis=1))
+    print 'Difference:', grad_diff
+    return grad_diff
 
 def rxzero_traj_eval(parms, t_idx, x0, y0):
     """
@@ -230,7 +360,7 @@ def rxzero_traj_eval(parms, t_idx, x0, y0):
     are actualy an array of parm tuple
     """
     v_amp_array = np.array([rxzero_vel_amp_eval(parm, t_idx) for parm in parms])
-    phi_array = np.array([rxzero_normal_Phi_eval(parm, t_idx) for parm in parms])   
+    phi_array = np.array([rxzero_normal_Phi_eval(parm, t_idx) for parm in parms])
     dt = t_idx[1] - t_idx[0]
     v_x = np.sum(np.abs(v_amp_array) * np.cos(phi_array), axis=0)
     v_y = np.sum(np.abs(v_amp_array) * np.sin(phi_array), axis=0)
@@ -238,6 +368,64 @@ def rxzero_traj_eval(parms, t_idx, x0, y0):
     #more consideration is needed for this dt...
     res_pos = np.array([x0, y0]) + np.cumsum(v_vec, axis=0) * dt
     return res_pos, v_vec
+
+def rxzero_traj_eval_grad(parms, t_idx):
+    """
+    Analytical gradient for evaluated trajectory with respect to the log-normal parameters
+    It is expected to boost the optimization performance when the parameters are high-dimensional...
+    """
+    v_amp_array = np.array([rxzero_vel_amp_eval(parm, t_idx) for parm in parms])
+    phi_array = np.array([rxzero_normal_Phi_eval(parm, t_idx) for parm in parms])
+    v_amp_grad_array = np.array([np.vstack([rxzero_vel_amp_eval_grad(parm[0:4], t_idx).T, np.zeros((2, len(t_idx)))]).T for parm in parms])
+    phi_grad_array = np.array([rxzero_normal_Phi_eval_grad(parm, t_idx) for parm in parms])
+
+    v_x_grad = np.concatenate([(v_amp_grad_array[parm_idx].T * np.cos(phi_array[parm_idx]) - v_amp_array[parm_idx] * np.sin(phi_array[parm_idx]) * phi_grad_array[parm_idx].T).T for parm_idx in range(len(parms))], axis=1)
+    v_y_grad = np.concatenate([(v_amp_grad_array[parm_idx].T * np.sin(phi_array[parm_idx]) + v_amp_array[parm_idx] * np.cos(phi_array[parm_idx]) * phi_grad_array[parm_idx].T).T for parm_idx in range(len(parms))], axis=1)
+
+    dt = t_idx[1] - t_idx[0]
+    pos_x_grad = np.cumsum(v_x_grad, axis=0) * dt
+    pos_y_grad = np.cumsum(v_y_grad, axis=0) * dt
+    return np.array([pos_x_grad, pos_y_grad]), np.array([v_x_grad, v_y_grad])
+
+def rxzero_traj_eval_grad_test():
+    num_comps = 5
+
+    def prepare_parm():
+        D = np.random.rand() * 1.5
+        t0 = np.random.rand() * 0.3
+        mu = np.random.rand() * 0.5
+        sigma = np.random.rand() * 0.5 + 0.1
+
+        theta_s = np.random.rand() * np.pi
+        theta_e = np.random.rand() * np.pi
+        return np.array([D, t0, mu, sigma, theta_s, theta_e])
+
+    test_parms = np.array([prepare_parm() for i in range(num_comps)])
+
+    t_array = np.linspace(0.0, 1.0, 100)
+    analytical_grad, _ = rxzero_traj_eval_grad(test_parms, t_array)
+    #finite difference
+    EPS = 1e-5
+    num_grad_x = []
+    num_grad_y = []
+    for idx, test_parm in enumerate(test_parms.flatten()):
+        parm_plus = copy.copy(test_parms.flatten())
+        parm_plus[idx] += EPS
+        parm_neg = copy.copy(test_parms.flatten())
+        parm_neg[idx] -= EPS
+        parm_plus_conc = np.reshape(parm_plus, (-1, 6))
+        parm_neg_conc = np.reshape(parm_neg, (-1, 6))
+        eval_plus, _ = rxzero_traj_eval(parm_plus_conc, t_array, 0, 0)
+        eval_neg, _ = rxzero_traj_eval(parm_neg_conc, t_array, 0, 0)
+        tmp_grad = (eval_plus - eval_neg)/(2.0 * EPS)
+        num_grad_x.append(tmp_grad[:, 0])
+        num_grad_y.append(tmp_grad[:, 1])
+    num_grad_x = np.array(num_grad_x).T
+    num_grad_y = np.array(num_grad_y).T
+
+    grad_diff = np.mean(np.sum((analytical_grad[0] - num_grad_x)**2, axis=1)) + np.mean(np.sum((analytical_grad[1] - num_grad_y)**2, axis=1))
+    print 'Difference:', grad_diff
+    return grad_diff
 
 def rxzero_estimation(reg_pnts, vel_profile, dt=0.01):
     """
@@ -299,7 +487,7 @@ def rxzero_sig_ang_estimation(vel_parm, reg_pnts_phi):
     D, t0, mu, sigma = vel_parm
     a_array = np.array([3*sigma, 1.5*sigma**2+sigma*np.sqrt(0.25*sigma**2+1),
                 sigma**2, 1.5*sigma**2-sigma*np.sqrt(0.25*sigma**2+1), -3*sigma])
-    l_array = np.array([0, 
+    l_array = np.array([0,
     D/2*(1+erf(-a_array[1]/(sigma*sqrt_2))),
     D/2*(1+erf(-a_array[2]/(sigma*sqrt_2))),
     D/2*(1+erf(-a_array[3]/(sigma*sqrt_2))),
@@ -341,7 +529,7 @@ def rxzero_sig_local_optimization(parm, vel_traj, vel_profile, reg_pnts, dt=0.01
     t_array = np.arange(len(vel_traj))*dt
     D, t0, mu, sigma, theta_s, theta_e = parm
     def obj_func(x, *args):
-        vel_traj, D, t0 = args  
+        vel_traj, D, t0 = args
         #objective function
         #x: mu, sigma, theta_s, theta_e
         _, res_vel_vec = rxzero_traj_eval([(D, t0, x[0], x[1], x[2], x[3])], t_array, 0, 0)
@@ -350,13 +538,24 @@ def rxzero_sig_local_optimization(parm, vel_traj, vel_profile, reg_pnts, dt=0.01
         """
         return np.sum(np.sum((res_vel_vec[reg_pnts[0]:reg_pnts[4], :] - vel_traj[reg_pnts[0]:reg_pnts[4], :])**2, axis=1))
 
+    def obj_func_grad(x, *args):
+        vel_traj, D, t0 = args
+        _, res_vel_vec = rxzero_traj_eval([(D, t0, x[0], x[1], x[2], x[3])], t_array, 0, 0)
+        _, vel_vec_grad = rxzero_traj_eval_grad([(D, t0, x[0], x[1], x[2], x[3])], t_array)
+        #slice the effective dimensions
+        grad = np.sum(2 * ((res_vel_vec[reg_pnts[0]:reg_pnts[4], 0] - vel_traj[reg_pnts[0]:reg_pnts[4], 0]) * vel_vec_grad[0][reg_pnts[0]:reg_pnts[4], 2:].T +
+                    (res_vel_vec[reg_pnts[0]:reg_pnts[4], 1] - vel_traj[reg_pnts[0]:reg_pnts[4], 1]) * vel_vec_grad[1][reg_pnts[0]:reg_pnts[4], 2:].T), axis=1)
+        return grad
+
     theta_scale = 0.1
     bounds_array = [
         #here note the bound of sig, it must be larger than zero...
         (mu-sigma, mu+sigma), (0.5*sigma, 1.5*sigma),       #mu, sig
         #(theta_s-np.pi*theta_scale, theta_s+np.pi*theta_scale), (theta_e-np.pi*theta_scale, theta_e+np.pi*theta_scale)]                                    #theta_s, theta_e
         (None, None), (None, None)]                                 #theta_s, theta_e
-    opt_res = sciopt.minimize(  fun=obj_func, x0=[mu, sigma, theta_s, theta_e], args=(vel_traj, D, t0),
+    opt_res = sciopt.minimize(  fun=obj_func,
+                                jac=obj_func_grad,
+                                x0=[mu, sigma, theta_s, theta_e], args=(vel_traj, D, t0),
                                 bounds=bounds_array,
                                 options={'xtol': 1e-8, 'disp': False})
     # print 'x0:', [mu, sigma, theta_s, theta_e]
@@ -411,7 +610,7 @@ def rxzero_sig_extract(pos_traj, bFirstMode=True, dt=0.01, premodes=None, global
         else:
             #we must find the reg points with t3 greater than previous ones...
             #this might also be applied to most important mode, but let's first ignore that...
-            #note, inferring 
+            #note, inferring
             mode_reg_pnts = None
             for candidate_reg_pnts in reg_pnts:
                 print 'cand_reg_pnts:', candidate_reg_pnts[2]
@@ -441,7 +640,7 @@ def rxzero_sig_extract(pos_traj, bFirstMode=True, dt=0.01, premodes=None, global
     opt_parm = rxzero_sig_local_optimization((D, t0, mu, sigma, theta_s, theta_e), vel_vec, vel_profile, mode_reg_pnts, dt)
     return opt_parm, mode_reg_pnts
 
-def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1):
+def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_iters=200):
     """
     global optimization for all parms to fit given position trajectory
     """
@@ -456,24 +655,42 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1):
         theta_parms, vel_traj = args
         #construct parameters
         vel_parms = np.reshape(x, (-1, 4))
+        n_comps = len(vel_parms)
+        effective_dims = np.concatenate([range(comp_idx*6, comp_idx*6+4) for comp_idx in range(n_comps)])
         conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
         _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
-        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1))
+        _, vel_vec_grad = rxzero_traj_eval_grad(conc_parms, t_vel_array)
+        #slice the effective dimensions
+        grad = np.sum(2 * ((eval_vel[:, 0] - vel_traj[:, 0]) * vel_vec_grad[0][:, effective_dims].T +
+                    (eval_vel[:, 1] - vel_traj[:, 1]) * vel_vec_grad[1][:, effective_dims].T), axis=1)
+
+        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1)), grad
 
     def obj_func_step_2(x, *args):
         vel_parms, pos_traj = args
         theta_parms = np.reshape(x, (-1, 2))
         conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
         eval_pos, _ = rxzero_traj_eval(conc_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
-        return np.sum(np.sum((eval_pos - pos_traj)**2, axis=1))
+        pos_vec_grad, _ = rxzero_traj_eval_grad(conc_parms, t_array)
+        #slice the effective dimensions
+        n_comps = len(theta_parms)
+        effective_dims = np.concatenate([range(comp_idx*6+4, comp_idx*6+6) for comp_idx in range(n_comps)])
+        grad = np.sum(2 * ((eval_pos[:, 0] - pos_traj[:, 0]) * pos_vec_grad[0][:, effective_dims].T +
+                    (eval_pos[:, 1] - pos_traj[:, 1]) * pos_vec_grad[1][:, effective_dims].T), axis=1)
+        return np.sum(np.sum((eval_pos - pos_traj)**2, axis=1)), grad
 
     def obj_func_step_3(x, *args):
         vel_traj = args[0]
         conc_parms = np.reshape(x, (-1, 6))
         _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
-        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1))
+        _, vel_vec_grad = rxzero_traj_eval_grad(conc_parms, t_vel_array)
+        grad = np.sum(2 * ((eval_vel[:, 0] - vel_traj[:, 0]) * vel_vec_grad[0].T +
+                    (eval_vel[:, 1] - vel_traj[:, 1]) * vel_vec_grad[1].T), axis=1)
+
+        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1)), grad
 
     curr_parms = np.array(parms)
+    opt_dict = {'maxiter':solver_max_iters}
     #<hyin/Feb-20th-2015> fixed a bug that leads to no solution
     #actually, skipping step 1 and step 3 seems okay for sake of speed (buggy version)
     #better to add an option to choose precise verions/approximate version
@@ -487,10 +704,10 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1):
             parm_bounds = [ (0.5*parm[0], 1.5*parm[0]), #D
                             (parm[1] - 0.5*np.abs(parm[1]), parm[1] + 0.5*np.abs(parm[1])), #t0
                             (None, None),               #mu
-                            (0.05, 3)                 #sigma
+                            (0, 3)                 #sigma
                             ]
             bounds_step_1 = bounds_step_1 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_1, x_init_1, args=(curr_parms[:, 4:6], vel_vec_traj), bounds=bounds_step_1)
+        opt_res = sciopt.minimize(obj_func_step_1, x_init_1, args=(curr_parms[:, 4:6], vel_vec_traj), bounds=bounds_step_1, jac=True, options=opt_dict)
         curr_parms[:, 0:4] = np.reshape(opt_res.x, (-1, 4))
 
         #step 2
@@ -501,7 +718,7 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1):
                             (-np.pi, np.pi)                #theta_e
                             ]
             bounds_step_2 = bounds_step_2 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_2, x_init_2, args=(curr_parms[:, 0:4], pos_traj), bounds=bounds_step_2)
+        opt_res = sciopt.minimize(obj_func_step_2, x_init_2, args=(curr_parms[:, 0:4], pos_traj), bounds=bounds_step_2, jac=True, options=opt_dict)
         curr_parms[:, 4:6] = np.reshape(opt_res.x, (-1, 2))
 
         #step 3
@@ -518,9 +735,8 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1):
                             ]
             bounds_step_3 = bounds_step_3 + parm_bounds
 
-        opt_res = sciopt.minimize(obj_func_step_3, x_init_3, args=(vel_vec_traj, ), bounds=bounds_step_3)
+        opt_res = sciopt.minimize(obj_func_step_3, x_init_3, args=(vel_vec_traj, ), bounds=bounds_step_3, jac=True, options=opt_dict)
         curr_parms = np.reshape(opt_res.x, (-1, 6))
-
     return curr_parms
 
 def rxzero_add_stroke(pos_traj, logsig_parms, dt=0.01, reg_pnts=None):
@@ -668,11 +884,11 @@ def rxzero_train(pos_traj, dt = 0.01, global_opt_itrs=1, verbose=False, getregpn
             pass
         else:
             curr_traj = rxzero_subtract_stroke(curr_traj, parms[J+1], dt, reg_pnts=None)
-            
+
             if verbose:
                 axes = rxzero_plot_helper(curr_traj, [parms[J+1]], reg_pnts=None, dt=dt, axes=axes)
                 raw_input('Substract J+1 to make an isolated stroke. Press ENTER to continue...')
-            
+
             #formal extraction, note ignore current guess for J & J+1
             extract_parm, reg_pnts_curr = rxzero_sig_extract(curr_traj, bFirstMode, dt, premodes[0:-2], global_pos_traj=pos_traj, vel_max_lst=vel_max_lst)
             if extract_parm is not None:
@@ -697,7 +913,7 @@ def rxzero_train(pos_traj, dt = 0.01, global_opt_itrs=1, verbose=False, getregpn
             else:
                 reg_pnts_lst[J] = reg_pnts_curr
                 premodes[J] = reg_pnts_curr[2]
-        
+
         reg_pnts_curr = reg_pnts_lst[J]
 
         if verbose:
@@ -797,7 +1013,7 @@ def rxzero_plot_helper(pos_traj, parms, vel_vec_n=None, reg_pnts=None, dt=0.01, 
     else:
         ax_pos.plot(rec_traj[:, 0] + pos_traj[0, 0], -rec_traj[:, 1] - pos_traj[0, 1], 'g')
         ax_vel.plot(t_array, rec_vel_amp, 'r')
-    
+
     #for each parms
     for parm in parms:
         #reconstruct
@@ -815,17 +1031,17 @@ def rxzero_plot_helper(pos_traj, parms, vel_vec_n=None, reg_pnts=None, dt=0.01, 
     colors = ['r', 'y', 'k', 'g', 'w']
     if reg_pnts is not None:
         for reg_pnt_idx in range(5):
-                ax_vel.plot(reg_pnts[reg_pnt_idx]*dt, 
+                ax_vel.plot(reg_pnts[reg_pnt_idx]*dt,
                     vel_profile[reg_pnts[reg_pnt_idx]],
                     colors[reg_pnt_idx]+'o')
                 ax_vel_x.plot(  reg_pnts[reg_pnt_idx]*dt,
-                                vel_vec[reg_pnts[reg_pnt_idx], 0], 
+                                vel_vec[reg_pnts[reg_pnt_idx], 0],
                                 colors[reg_pnt_idx]+'o')
                 ax_vel_y.plot(  reg_pnts[reg_pnt_idx]*dt,
-                                vel_vec[reg_pnts[reg_pnt_idx], 1], 
+                                vel_vec[reg_pnts[reg_pnt_idx], 1],
                                 colors[reg_pnt_idx]+'o')
                 ax_ang.plot(    reg_pnts[reg_pnt_idx]*dt,
-                                phi_array[reg_pnts[reg_pnt_idx]], 
+                                phi_array[reg_pnts[reg_pnt_idx]],
                                 colors[reg_pnt_idx]+'o')
 
 
@@ -921,7 +1137,7 @@ def rxzero_stat_test(pos_traj_lst, parms_lst, dt=0.01):
     fig_nstrokes = plt.figure()
     #number of strokes
     ax_nstrokes = fig_nstrokes.add_subplot(111)
-    
+
     n, bins, patches = ax_nstrokes.hist(np.array(stat['nStrokes']), 20, normed=0, facecolor='green', alpha=0.75)
     ax_nstrokes.set_xlabel('Num of strokes')
     ax_nstrokes.set_ylabel('Occurrence')
@@ -985,7 +1201,7 @@ def rxzero_stat_test(pos_traj_lst, parms_lst, dt=0.01):
 def fit_parm_component_with_global_optimization(pos_traj, parms, free_comp_idx, dt=0.01, maxIters=1):
     """
     global optimization for adjusting free parms to fit given position trajectory
-    this is similar to what we did in the rxzero global optimization 
+    this is similar to what we did in the rxzero global optimization
     but now we want to see how each component can fit the overall letter profile
     this is an extended version - it might be better to merge it with the existing rxzero, but let's have it here for now
     """
@@ -1098,7 +1314,7 @@ def fit_parm_scale_ang_component_with_global_optimization(pos_traj, parms, free_
         curr_parms, pos_traj, free_comp_idx = args
         theta_parms = np.reshape(x, (-1, 2))
         conc_parms = np.array(curr_parms, copy=True)
-        
+
         conc_parms[free_comp_idx, [4, 5]] = theta_parms
         eval_pos, _ = rxzero_traj_eval(conc_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
         return np.sum(np.sum(np.abs((eval_pos - pos_traj)), axis=1))

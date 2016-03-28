@@ -268,17 +268,17 @@ def display_data(letters):
         for s in l:
             if len(s.shape) == 2:
                 #original format
-                ax.plot(s[:, 0], -s[:, 1])
+                ax.plot(s[:, 0], -s[:, 1], linewidth=3.5)
             else:
                 #compact format, extract data
                 if len(s) % 2 == 1:
                     x_data = s[0:(len(s)-1)/2]
                     y_data = s[(len(s)-1)/2:(len(s)-1)]
-                    ax.plot(x_data, -y_data)
+                    ax.plot(x_data, -y_data, linewidth=3.5)
                 else:
                     x_data = s[0:len(s)/2]
                     y_data = s[len(s)/2:]
-                    ax.plot(x_data, -y_data)
+                    ax.plot(x_data, -y_data, linewidth=3.5)
     ax.set_xlabel('X Coordinate (Unit)')
     ax.set_ylabel('Y Coordinate (Unit)')
     ax.set_aspect('equal')

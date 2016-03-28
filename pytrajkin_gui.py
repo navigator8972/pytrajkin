@@ -34,8 +34,11 @@ class PyTrajKin_GUI(QMainWindow):
         self.create_main_frame()
         self.create_status_bar()
         self.create_action()
-        self.main_frame.show()
+        # self.main_frame.show()
         self.disable_items()
+
+        self.char_mdl = []
+        return
 
     def create_menu(self):
         return
