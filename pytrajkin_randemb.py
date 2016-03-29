@@ -5,7 +5,7 @@ import cPickle as cp
 from collections import defaultdict
 
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 
 import scipy.optimize as sciopt
 
@@ -98,7 +98,7 @@ class TrajKinMdl:
         if train_kin_var:
             self.train_leaf_kin_mdl_var()
 
-        return      
+        return
 
     def train_leaf_kin_mdl(self, tmp_rf_mdl):
         #construct kinematics model for each leaf, then the synthesis can be done on the kinematics parm space
@@ -173,7 +173,7 @@ class TrajKinMdl:
             parm = np.reshape(x, (-1, 6))
             t_array = np.arange(0.0, 1.0, 0.01)
             eval_traj, eval_vel = pytkrxz.rxzero_traj_eval(parms, t_array, start_pnt[0], start_pnt[1])
-            
+
             #regularization term
             val = 0.5 * np.linalg.norm(sigma) + 0.5*np.sum((x-mu_theta)*(x-mu_theta)*1./(sigma+1e-5))
             #cost term
@@ -209,7 +209,7 @@ class TrajKinMdl:
             parms = np.reshape(theta_0, (-1, 6))
             bounds_theta = []
             for parm in parms:
-                parm_bounds = [ 
+                parm_bounds = [
                                 (0.5*parm[0], 1.5*parm[0]), #D
                                 (parm[1] - 0.5*np.abs(parm[1]), parm[1] + 0.5*np.abs(parm[1])), #t0
                                 (None, None),               #mu
@@ -235,7 +235,7 @@ class TrajKinMdl:
             #print 'inferring sigma'
             args = (mu_theta, theta, )
             opt_res = sciopt.minimize(obj_func_sigma, sigma_0, args=args, bounds=bounds_sigma)
-            
+
             return opt_res.x
 
         mu_theta = parms.flatten()
@@ -280,7 +280,7 @@ class TrajKinMdl:
                         print 'Training Var model for tree {0} and leaf node {1}'.format(tree_idx, leaf_idx)
                         start_pnt = d[0]
                         parms = d[1]
-                        
+
                         #leaf samples
                         samples = tmp_rf_mdl['samples_dict'][tree_idx, leaf_idx]
                         #learn local MaxEnt model, concerning the variability of kin parameters
@@ -352,7 +352,7 @@ class TrajKinMdl:
 
         #recover if pca is used
         #note, sample_from_rf_mdl take average in reduced space...
-        #<hyin/Feb-19th-2015> this seems not a good idea, average in reduced space give 
+        #<hyin/Feb-19th-2015> this seems not a good idea, average in reduced space give
         #weird reconstruction. Also, note that, the correlation between strokes are actually
         #not learned, so this sample is independent without considering previous strokes
         #this might result in some issue
@@ -423,7 +423,7 @@ class TrajKinMdl:
 
         return success
 
-    def random_forest_embedding(self, data, n_estimators=50, random_state=0, max_depth=3, min_samples_leaf=1):
+    def random_forest_embedding(self, data, n_estimators=30, random_state=0, max_depth=3, min_samples_leaf=1):
         """
         learn a density with random forest representation
         """
@@ -434,12 +434,12 @@ class TrajKinMdl:
         # random_state = 0
         # max_depth = 5
         rf_mdl = RandomTreesEmbedding(
-            n_estimators=n_estimators, 
-            random_state=random_state, 
+            n_estimators=n_estimators,
+            random_state=random_state,
             max_depth=max_depth,
             min_samples_leaf=min_samples_leaf)
         rf_mdl.fit(data)
-        
+
         indices = rf_mdl.apply(data)
         samples_by_node = defaultdict(list)
         idx_by_node = defaultdict(list)
@@ -449,7 +449,7 @@ class TrajKinMdl:
             for est_ind, leaf in enumerate(est_data):
                 samples_by_node[ est_ind, leaf ].append(sample)
                 idx_by_node[ est_ind, leaf ].append(idx)
-          
+
         res_mdl = dict()
         res_mdl['rf_mdl'] = rf_mdl
         res_mdl['samples_dict'] = samples_by_node
@@ -500,7 +500,7 @@ class TrajKinMdl:
                     else:
                         #expand right side
                         return recurse(tree, right_child_node_idx)
-            
+
             sample_leaf_idx = recurse(tmp_tree, 0)
             #local gaussian for leaf samples
             samples = mdl['samples_dict'][tree_idx, sample_leaf_idx]
@@ -542,7 +542,7 @@ class TrajKinMdl:
 
 
                         t_array = np.arange(0.0, 1.0, 0.01)
-                        eval_traj, eval_vel = pytkrxz.rxzero_traj_eval(applied_parms, t_array, 
+                        eval_traj, eval_vel = pytkrxz.rxzero_traj_eval(applied_parms, t_array,
                             applied_start_pnt[0], applied_start_pnt[1])
                         sample = eval_traj.transpose().flatten()
                 else:
@@ -555,7 +555,7 @@ class TrajKinMdl:
             return sample, tree_idx, sample_leaf_idx, perturb_parm - mean_parm
 
         res_samples = np.array([samle_from_rf_mdl_helper(sample_from_kin) for i in range(n_samples)])
-        
+
         return res_samples
 
 def trajkinsyn_test(data, fname=None):
@@ -572,17 +572,17 @@ def trajkinsyn_test(data, fname=None):
     else:
         print 'Loading the model'
         trajkin_mdl.load(fname)
-        
+
     ax = None
     #sample...
     while 1:
-        if ax is None:   
+        if ax is None:
             fig = plt.figure()
             ax = fig.add_subplot(111)
             plt.ion()
             plt.show()
             ax.hold(False)
-    
+
         sample_data = trajkin_mdl.sample()
 
         for sample in sample_data:
@@ -616,7 +616,7 @@ def trajkinsyn_var_test(fname):
     trajkin_mdl.load(fname)
 
     #train a local model to infer latent variables
-    #two strokes, the first 
+    #two strokes, the first
     # rf_mdl = trajkin_mdl.model_[2][0]
 
     trajkin_mdl.train_leaf_kin_mdl_var()
@@ -630,7 +630,7 @@ def trajkinsyn_var_test(fname):
             plt.ion()
             plt.show()
             ax.hold(False)
-    
+
         sample_data = trajkin_mdl.sample()
         for sample in sample_data:
             #plot sample data for each stroke

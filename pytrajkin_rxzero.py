@@ -640,9 +640,12 @@ def rxzero_sig_extract(pos_traj, bFirstMode=True, dt=0.01, premodes=None, global
     opt_parm = rxzero_sig_local_optimization((D, t0, mu, sigma, theta_s, theta_e), vel_vec, vel_profile, mode_reg_pnts, dt)
     return opt_parm, mode_reg_pnts
 
-def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_iters=200):
+def fit_parm_component_with_global_optimization(pos_traj, parms, free_comp_idx, dt=0.01, maxIters=1, solver_max_iters=200):
     """
-    global optimization for all parms to fit given position trajectory
+    global optimization for adjusting free parms to fit given position trajectory
+    this is similar to what we did in the rxzero global optimization
+    but now we want to see how each component can fit the overall letter profile
+    this is an extended version - it might be better to merge it with the existing rxzero, but let's have it here for now - Done <hyin/Mar-29th-2016>
     """
     #following the ref, it is something like a variational inference procedure
     #1. optimize velocity with respect to D, t0, mu, sig
@@ -652,42 +655,46 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_
     t_vel_array = np.arange(len(pos_traj)-1)*dt
     vel_vec_traj = np.diff(pos_traj, axis=0) / dt
     def obj_func_step_1(x, *args):
-        theta_parms, vel_traj = args
+        curr_parms, vel_traj, free_comp_idx = args
         #construct parameters
         vel_parms = np.reshape(x, (-1, 4))
-        n_comps = len(vel_parms)
-        effective_dims = np.concatenate([range(comp_idx*6, comp_idx*6+4) for comp_idx in range(n_comps)])
-        conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
+        # conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
+        conc_parms = np.array(curr_parms, copy=True)
+        conc_parms[free_comp_idx, [0,1,2,3]] = vel_parms
         _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
         _, vel_vec_grad = rxzero_traj_eval_grad(conc_parms, t_vel_array)
-        #slice the effective dimensions
+        #slice the effective dimensions, only dimensions of free vel parms are needed
+        effective_dims = np.concatenate([range(idx * curr_parms.shape[1], idx * curr_parms.shape[1] + 4) for idx in np.concatenate(free_comp_idx)])
         grad = np.sum(2 * ((eval_vel[:, 0] - vel_traj[:, 0]) * vel_vec_grad[0][:, effective_dims].T +
                     (eval_vel[:, 1] - vel_traj[:, 1]) * vel_vec_grad[1][:, effective_dims].T), axis=1)
-
-        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1)), grad
+        return np.sum(np.sum(np.abs((eval_vel - vel_traj)), axis=1)), grad
 
     def obj_func_step_2(x, *args):
-        vel_parms, pos_traj = args
+        curr_parms, pos_traj, free_comp_idx = args
         theta_parms = np.reshape(x, (-1, 2))
-        conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
+        conc_parms = np.array(curr_parms, copy=True)
+        conc_parms[free_comp_idx, [4, 5]] = theta_parms
         eval_pos, _ = rxzero_traj_eval(conc_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
         pos_vec_grad, _ = rxzero_traj_eval_grad(conc_parms, t_array)
         #slice the effective dimensions
-        n_comps = len(theta_parms)
-        effective_dims = np.concatenate([range(comp_idx*6+4, comp_idx*6+6) for comp_idx in range(n_comps)])
+        effective_dims = np.concatenate([range(comp_idx*6+4, comp_idx*6+6) for comp_idx in np.concatenate(free_comp_idx)])
         grad = np.sum(2 * ((eval_pos[:, 0] - pos_traj[:, 0]) * pos_vec_grad[0][:, effective_dims].T +
                     (eval_pos[:, 1] - pos_traj[:, 1]) * pos_vec_grad[1][:, effective_dims].T), axis=1)
-        return np.sum(np.sum((eval_pos - pos_traj)**2, axis=1)), grad
+        return np.sum(np.sum(np.abs((eval_pos - pos_traj)), axis=1)), grad
 
     def obj_func_step_3(x, *args):
-        vel_traj = args[0]
-        conc_parms = np.reshape(x, (-1, 6))
+        curr_parms, vel_traj, free_comp_idx = args
+        full_parms = np.reshape(x, (-1, 6))
+        conc_parms = np.array(curr_parms, copy=True)
+        conc_parms[free_comp_idx, range(6)] = full_parms
         _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
         _, vel_vec_grad = rxzero_traj_eval_grad(conc_parms, t_vel_array)
-        grad = np.sum(2 * ((eval_vel[:, 0] - vel_traj[:, 0]) * vel_vec_grad[0].T +
-                    (eval_vel[:, 1] - vel_traj[:, 1]) * vel_vec_grad[1].T), axis=1)
+        #slice the effective dimensions, only dimensions of free vel parms are needed
+        effective_dims = np.concatenate([range(idx * curr_parms.shape[1], idx * curr_parms.shape[1] + curr_parms.shape[1]) for idx in np.concatenate(free_comp_idx)])
+        grad = np.sum(2 * ((eval_vel[:, 0] - vel_traj[:, 0]) * vel_vec_grad[0][:, effective_dims].T +
+                    (eval_vel[:, 1] - vel_traj[:, 1]) * vel_vec_grad[1][:, effective_dims].T), axis=1)
 
-        return np.sum(np.sum((eval_vel - vel_traj)**2, axis=1)), grad
+        return np.sum(np.sum(np.abs((eval_vel - vel_traj)), axis=1)), grad
 
     curr_parms = np.array(parms)
     opt_dict = {'maxiter':solver_max_iters}
@@ -697,36 +704,36 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_
     #or derive closed form gradient/do offline training on a workstation...
     for i in range(maxIters):
         #step 1
-        x_init_1 = curr_parms[:, 0:4].flatten()
+        x_init_1 = curr_parms[free_comp_idx, range(4)].flatten()
         #construct bounds...
         bounds_step_1 = []
-        for parm in curr_parms:
-            parm_bounds = [ (0.5*parm[0], 1.5*parm[0]), #D
+        for parm in curr_parms[free_comp_idx, range(curr_parms.shape[1])]:
+            parm_bounds = [ (0.5*parm[0], 3.5*parm[0]), #D
                             (parm[1] - 0.5*np.abs(parm[1]), parm[1] + 0.5*np.abs(parm[1])), #t0
                             (None, None),               #mu
-                            (0, 3)                 #sigma
+                            (0.00, 3)                 #sigma
                             ]
             bounds_step_1 = bounds_step_1 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_1, x_init_1, args=(curr_parms[:, 4:6], vel_vec_traj), bounds=bounds_step_1, jac=True, options=opt_dict)
-        curr_parms[:, 0:4] = np.reshape(opt_res.x, (-1, 4))
+        opt_res = sciopt.minimize(obj_func_step_1, x_init_1, args=(curr_parms, vel_vec_traj, free_comp_idx), jac=True, bounds=bounds_step_1, options=opt_dict)
+        curr_parms[free_comp_idx, [0, 1, 2, 3]] = np.reshape(opt_res.x, (-1, 4))
 
         #step 2
-        x_init_2 = curr_parms[:, 4:6].flatten()
+        x_init_2 = curr_parms[free_comp_idx, range(4, 6)].flatten()
         bounds_step_2 = []
-        for parm in curr_parms:
+        for parm in curr_parms[free_comp_idx, range(curr_parms.shape[1])]:
             parm_bounds = [ (-np.pi, np.pi),               #theta_s
                             (-np.pi, np.pi)                #theta_e
                             ]
             bounds_step_2 = bounds_step_2 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_2, x_init_2, args=(curr_parms[:, 0:4], pos_traj), bounds=bounds_step_2, jac=True, options=opt_dict)
-        curr_parms[:, 4:6] = np.reshape(opt_res.x, (-1, 2))
+        opt_res = sciopt.minimize(obj_func_step_2, x_init_2, args=(curr_parms, pos_traj, free_comp_idx), jac=True, bounds=bounds_step_2, options=opt_dict)
+        curr_parms[free_comp_idx, [4, 5]] = np.reshape(opt_res.x, (-1, 2))
 
         #step 3
-        x_init_3 = curr_parms.flatten()
+        x_init_3 = curr_parms[free_comp_idx, range(curr_parms.shape[1])].flatten()
         #construct bounds...
         bounds_step_3 = []
-        for parm in curr_parms:
-            parm_bounds = [ (0.5*parm[0], 1.5*parm[0]), #D
+        for parm in curr_parms[free_comp_idx, range(curr_parms.shape[1])]:
+            parm_bounds = [ (0.5*parm[0], 3.5*parm[0]), #D
                             (parm[1] - 0.5*np.abs(parm[1]), parm[1] + 0.5*np.abs(parm[1])), #t0
                             (None, None),               #mu
                             (0.0, 3.0),               #sigma
@@ -735,8 +742,24 @@ def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_
                             ]
             bounds_step_3 = bounds_step_3 + parm_bounds
 
-        opt_res = sciopt.minimize(obj_func_step_3, x_init_3, args=(vel_vec_traj, ), bounds=bounds_step_3, jac=True, options=opt_dict)
-        curr_parms = np.reshape(opt_res.x, (-1, 6))
+        opt_res = sciopt.minimize(obj_func_step_3, x_init_3, args=(curr_parms, vel_vec_traj, free_comp_idx), jac=True, bounds=bounds_step_3, options=opt_dict)
+        curr_parms[free_comp_idx, range(6)] = np.reshape(opt_res.x, (-1, 6))[:, range(6)]
+
+    #evaluate position reconstruction error
+    eval_pos, eval_vel = rxzero_traj_eval(curr_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
+    # recons_err = np.sum(np.sum((eval_pos - pos_traj)**2, axis=1))
+    #evaluate reconstruction error from velocity profile?
+    recons_err = np.sum(np.sum((eval_vel[:-1, :] - vel_vec_traj)**2, axis=1))
+    return curr_parms, recons_err
+
+def rxzero_global_optimization(pos_traj, parms, dt=0.01, maxIters=1, solver_max_iters=200):
+    """
+    global optimization for all parms to fit given position trajectory
+    <hyin/Mar-29th-2016> unify routines to allow optimization constrained on given components
+    """
+    free_comp_idx = np.array([range(len(parms))]).T
+    curr_parms, _ = fit_parm_component_with_global_optimization(pos_traj, parms, free_comp_idx, dt, maxIters, solver_max_iters)
+
     return curr_parms
 
 def rxzero_add_stroke(pos_traj, logsig_parms, dt=0.01, reg_pnts=None):
@@ -1196,102 +1219,6 @@ def rxzero_stat_test(pos_traj_lst, parms_lst, dt=0.01):
     plt.show()
 
     return stat
-
-
-def fit_parm_component_with_global_optimization(pos_traj, parms, free_comp_idx, dt=0.01, maxIters=1):
-    """
-    global optimization for adjusting free parms to fit given position trajectory
-    this is similar to what we did in the rxzero global optimization
-    but now we want to see how each component can fit the overall letter profile
-    this is an extended version - it might be better to merge it with the existing rxzero, but let's have it here for now
-    """
-    #following the ref, it is something like a variational inference procedure
-    #1. optimize velocity with respect to D, t0, mu, sig
-    #2. optimize position with respect to theta_s, theta_e
-    #3. full optimization with respect to D, t0, mu, sig, theta_s, theta_e
-    t_array = np.arange(len(pos_traj))*dt
-    t_vel_array = np.arange(len(pos_traj)-1)*dt
-    vel_vec_traj = np.diff(pos_traj, axis=0) / dt
-    def obj_func_step_1(x, *args):
-        curr_parms, vel_traj, free_comp_idx = args
-        #construct parameters
-        vel_parms = np.reshape(x, (-1, 4))
-        # conc_parms = np.concatenate([vel_parms, theta_parms], axis=1)
-        conc_parms = np.array(curr_parms, copy=True)
-        conc_parms[free_comp_idx, [0,1,2,3]] = vel_parms
-        _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
-        return np.sum(np.sum(np.abs((eval_vel - vel_traj)), axis=1))
-
-    def obj_func_step_2(x, *args):
-        curr_parms, pos_traj, free_comp_idx = args
-        theta_parms = np.reshape(x, (-1, 2))
-        conc_parms = np.array(curr_parms, copy=True)
-        conc_parms[free_comp_idx, [4, 5]] = theta_parms
-        eval_pos, _ = rxzero_traj_eval(conc_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
-        return np.sum(np.sum(np.abs((eval_pos - pos_traj)), axis=1))
-
-    def obj_func_step_3(x, *args):
-        curr_parms, vel_traj, free_comp_idx = args
-        full_parms = np.reshape(x, (-1, 6))
-        conc_parms = np.array(curr_parms, copy=True)
-        conc_parms[free_comp_idx, range(6)] = full_parms
-        _, eval_vel = rxzero_traj_eval(conc_parms, t_vel_array, 0, 0)
-        return np.sum(np.sum(np.abs((eval_vel - vel_traj)), axis=1))
-
-    curr_parms = np.array(parms)
-    #<hyin/Feb-20th-2015> fixed a bug that leads to no solution
-    #actually, skipping step 1 and step 3 seems okay for sake of speed (buggy version)
-    #better to add an option to choose precise verions/approximate version
-    #or derive closed form gradient/do offline training on a workstation...
-    for i in range(maxIters):
-        #step 1
-        x_init_1 = curr_parms[free_comp_idx, 0:4].flatten()
-        #construct bounds...
-        bounds_step_1 = []
-        for parm in curr_parms[free_comp_idx, :]:
-            parm_bounds = [ (0.5*parm[0][0], 3.5*parm[0][0]), #D
-                            (parm[0][1] - 0.5*np.abs(parm[0][1]), parm[0][1] + 0.5*np.abs(parm[0][1])), #t0
-                            (None, None),               #mu
-                            (0.05, 3)                 #sigma
-                            ]
-            bounds_step_1 = bounds_step_1 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_1, x_init_1, args=(curr_parms, vel_vec_traj, free_comp_idx), bounds=bounds_step_1)
-        curr_parms[free_comp_idx, [0, 1, 2, 3]] = np.reshape(opt_res.x, (-1, 4))
-
-        #step 2
-        x_init_2 = curr_parms[free_comp_idx, 4:6].flatten()
-        bounds_step_2 = []
-        for parm in curr_parms[free_comp_idx, :]:
-            parm_bounds = [ (-np.pi, np.pi),               #theta_s
-                            (-np.pi, np.pi)                #theta_e
-                            ]
-            bounds_step_2 = bounds_step_2 + parm_bounds
-        opt_res = sciopt.minimize(obj_func_step_2, x_init_2, args=(curr_parms, pos_traj, free_comp_idx), bounds=bounds_step_2)
-        curr_parms[free_comp_idx, [4, 5]] = np.reshape(opt_res.x, (-1, 2))
-
-        #step 3
-        x_init_3 = curr_parms[free_comp_idx, :].flatten()
-        #construct bounds...
-        bounds_step_3 = []
-        for parm in curr_parms[free_comp_idx, :]:
-            parm_bounds = [ (0.5*parm[0][0], 3.5*parm[0][0]), #D
-                            (parm[0][1] - 0.5*np.abs(parm[0][1]), parm[0][1] + 0.5*np.abs(parm[0][1])), #t0
-                            (None, None),               #mu
-                            (0.0, 3.0),               #sigma
-                            (-np.pi, np.pi),               #theta_s
-                            (-np.pi, np.pi)                #theta_e
-                            ]
-            bounds_step_3 = bounds_step_3 + parm_bounds
-
-        opt_res = sciopt.minimize(obj_func_step_3, x_init_3, args=(curr_parms, vel_vec_traj, free_comp_idx), bounds=bounds_step_3)
-        curr_parms[free_comp_idx, range(6)] = np.reshape(opt_res.x, (-1, 6))[:, range(6)]
-
-    #evaluate position reconstruction error
-    eval_pos, eval_vel = rxzero_traj_eval(curr_parms, t_array, pos_traj[0, 0], pos_traj[0, 1])
-    # recons_err = np.sum(np.sum((eval_pos - pos_traj)**2, axis=1))
-    #evaluate reconstruction error from velocity profile?
-    recons_err = np.sum(np.sum((eval_vel[:-1, :] - vel_vec_traj)**2, axis=1))
-    return curr_parms, recons_err
 
 def fit_parm_scale_ang_component_with_global_optimization(pos_traj, parms, free_comp_idx, dt=0.01, maxIters=1):
     #this is a more restrictive one compared with the standard global optimization routine
