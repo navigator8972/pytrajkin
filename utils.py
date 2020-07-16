@@ -1,12 +1,12 @@
-
 """
 Module for utilities
 """
-
+from __future__ import print_function
 import numpy as np
 import copy
 from collections import defaultdict
 import matplotlib.pyplot as plt 
+
 
 import scipy
 from scipy import interpolate
@@ -15,7 +15,7 @@ from scipy.stats import itemfreq
 
 from sklearn.ensemble import RandomTreesEmbedding
 from sklearn.neighbors import KernelDensity
-from sklearn.grid_search import GridSearchCV
+# from sklearn.model_selection import GridSearchCV
 from sklearn import decomposition
 
 uji_data_set_file = 'data/ujipenchars2.txt'
@@ -25,7 +25,7 @@ def generate_data_files():
     uji_data_normed = normalize_data(uji_data)
     uji_data_interp = interp_data(uji_data)
     #smooth data
-    uji_data_smoothed = smoothed_data(uji_data_normed)
+    uji_data_smoothed = smooth_data(uji_data_normed)
     uji_data_interp_num_100 = interp_data_fixed_num(uji_data_smoothed)
 
     return uji_data_interp_num_100
@@ -214,7 +214,7 @@ def normalize_trajs_helper(trajs):
 def smooth_and_interp_trajs_helper(traj, filter_width=3, num=100):
     if len(traj) < filter_width:
         #too short, send a warning and return the original one...
-        print 'The stroke is with less than ', filter_width, ' sample points, retain the original one'
+        print('The stroke is with less than ', filter_width, ' sample points, retain the original one')
         return traj
     else:
         smoothed_stroke = np.array([spi.gaussian_filter(dim, filter_width) for dim in np.array(traj).transpose()]).transpose()
@@ -498,11 +498,11 @@ def sample_from_rf_mdl(mdl, n_samples=1):
         samples = mdl['samples_dict'][tree_idx, sample_leaf_idx]
         if len(samples) == 1:
             #local perturbation...
-            print 'only one at the leaf node...'
+            print('only one at the leaf node...')
             sample = samples[0]
         else:
             #mean+std
-            print 'leaf node contains {0} samples'.format(len(samples))
+            print('leaf node contains {0} samples'.format(len(samples)))
             sample = np.mean(samples, axis=0)
             #t0 is quite sensitive
             # sample[2:-1:6] = samples[1][2:-1:6]
@@ -670,7 +670,7 @@ def get_mean_letters(data):
     for d in data:
         ddict[len(d)].append(np.array(d))
     for n_strk in ddict.keys():
-        print 'Getting mean letters with {0} strokes.'.format(n_strk)
+        print('Getting mean letters with {0} strokes.'.format(n_strk))
         mean_data = None
         for letter in ddict[n_strk]:
             if mean_data is None:
@@ -686,7 +686,7 @@ def difference_of_two_letters(d1, d2):
     #euclidean distance between the two letters
     #they must have same number of strokes...
     if len(d1) != len(d2):
-        print 'The number of strokes are not equal!'
+        print('The number of strokes are not equal!')
         return None
     err = 0.0
     #use the first point as the anchor
@@ -694,7 +694,7 @@ def difference_of_two_letters(d1, d2):
     for i_strk in range(len(d1)):
         displacement = d2[i_strk][0] - d1[i_strk][0]
         err+=np.sum(np.sum((d2[i_strk] - d1[i_strk] - displacement)**2))/float(len(d1[i_strk]))
-        print 'Accumulated error till stroke {0}:'.format(i_strk+1), err
+        print('Accumulated error till stroke {0}:'.format(i_strk+1), err)
 
     return err/float(len(d1))
 
